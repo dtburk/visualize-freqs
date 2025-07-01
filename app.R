@@ -191,6 +191,7 @@ server <- function(input, output, session) {
     }
     
     # Create stacked bar chart with datasets on x-axis and response categories as fill
+    browser()
     p <- ggplot(plot_df, aes(x = dataset, y = percentage, fill = response_label)) +
       geom_col(position = "stack") +
       
@@ -217,7 +218,7 @@ server <- function(input, output, session) {
       theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 15),
             plot.title = element_text(hjust = 0.5, size = 16),
             legend.position = "none") +  # Remove legend
-      scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, 100))
+      scale_y_continuous(labels = function(x) paste0(x, "%"))
     
     return(p)
   })

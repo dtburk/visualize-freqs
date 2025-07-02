@@ -8,7 +8,7 @@ library(readr)
 
 # UI
 ui <- page_navbar(
-  title = "Dataset Comparison Tool",
+  title = "Compare Unweighted Percentages",
   fillable = TRUE,
   
   nav_panel("Chart View",

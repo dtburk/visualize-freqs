@@ -1,52 +1,75 @@
 library(shiny)
 library(bslib)
-library(ggplot2)
+library(plotly)
 library(dplyr)
 library(tidyr)
 library(DT)
 library(readr)
 
 # UI
-ui <- page_sidebar(
+ui <- page_navbar(
   title = "Dataset Comparison Tool",
-  sidebar = sidebar(
-    fileInput("file", "Upload Tab-Delimited File",
-              accept = ".dat"),
-    
-    conditionalPanel(
-      condition = "output.fileUploaded",
-      
-      h4("Select Datasets to Compare"),
-      selectInput("datasets", 
-                  label = NULL,
-                  choices = NULL,
-                  multiple = TRUE,
-                  selectize = TRUE),
-      
-      br(),
-      actionButton("selectAll", "Select All", class = "btn-sm"),
-      actionButton("clearAll", "Clear All", class = "btn-sm"),
-      
-      br(), br(),
-      h4("Display Options"),
-      checkboxInput("showPercentages", "Show Percentages on Bars", value = TRUE),
-      checkboxInput("showDataSummary", "Show Data Summary Table", value = FALSE)
-    )
+  fillable = TRUE,
+  
+  nav_panel("Chart View",
+            page_sidebar(
+              sidebar = sidebar(
+                fileInput("file", "Upload Tab-Delimited File",
+                          accept = c(".dat")),
+                
+                conditionalPanel(
+                  condition = "output.fileUploaded",
+                  
+                  h4("Display Options"),
+                  selectInput("sortBy", 
+                              "Sort datasets by category:",
+                              choices = c("No sorting" = "none"),
+                              selected = "none"),
+                  
+                  br(), br(),
+                  
+                  h4("Select Datasets to Compare"),
+                  selectInput("datasets", 
+                              label = NULL,
+                              choices = NULL,
+                              multiple = TRUE,
+                              selectize = TRUE),
+                  
+                  br(),
+                  actionButton("selectAll", "Select All", class = "btn-sm"),
+                  actionButton("clearAll", "Clear All", class = "btn-sm")
+                )
+              ),
+              
+              layout_columns(
+                card(
+                  #card_header("Plot Unweighted Percentages"),
+                  div(
+                    style = "overflow-x: auto; max-width: 100%;",
+                    uiOutput("plotContainer")
+                  )
+                )
+              )
+            )
   ),
   
-  layout_columns(
-    card(
-      card_header("Comparison Chart"),
-      plotOutput("comparisonPlot", height = "600px")
-    )
-  ),
-  
-  conditionalPanel(
-    condition = "input.showDataSummary",  
-    card(
-      card_header("Data Summary"),
-      DT::dataTableOutput("dataSummary")
-    )
+  nav_panel("Data Summary",
+            fillable = TRUE,
+            conditionalPanel(
+              condition = "output.fileUploaded",
+              #card(
+              #  fill = TRUE,
+              #  card_header("Data Summary Table"),
+                DT::dataTableOutput("dataSummary", height = "100%")
+              #)
+            ),
+            conditionalPanel(
+              condition = "!output.fileUploaded",
+              div(
+                style = "text-align: center; margin-top: 100px;",
+                h4("Please upload a file first to view the data summary.")
+              )
+            )
   )
 )
 
@@ -124,6 +147,12 @@ server <- function(input, output, session) {
                         choices = setNames(dataset_ids, dataset_ids),
                         selected = dataset_ids[1:min(3, length(dataset_ids))])
       
+      # Update sort by choices with category labels
+      category_labels <- df[[2]][!is.na(df[[2]]) & df[[2]] != ""]
+      sort_choices <- c("No sorting" = "none")
+      sort_choices <- c(sort_choices, setNames(category_labels, category_labels))
+      updateSelectInput(session, "sortBy", choices = sort_choices)
+      
       showNotification("File uploaded successfully!", type = "message")
       
     }, error = function(e) {
@@ -149,6 +178,15 @@ server <- function(input, output, session) {
     updateSelectInput(session, "datasets", selected = character(0))
   })
   
+  # Grab variable label
+  variable_label <- reactive({
+    req(data())
+    
+    df <- data()
+    
+    return(names(df)[[2]])
+  })
+  
   # Prepare data for plotting
   plot_data <- reactive({
     req(data(), input$datasets)
@@ -164,7 +202,7 @@ server <- function(input, output, session) {
     # Rename columns for easier handling
     names(plot_df)[1:2] <- c("response_code", "response_label")
     
-    # Convert to long format for ggplot
+    # Convert to long format for plotly
     plot_df_long <- plot_df %>%
       pivot_longer(cols = starts_with("unweighted %"),
                    names_to = "dataset",
@@ -178,48 +216,108 @@ server <- function(input, output, session) {
     return(plot_df_long)
   })
   
-  # Create the comparison plot
-  output$comparisonPlot <- renderPlot({
+  # Prepare sorted data for plotting
+  sorted_plot_data <- reactive({
     req(plot_data())
     
     plot_df <- plot_data()
     
+    if (input$sortBy == "none" || is.null(input$sortBy)) {
+      return(plot_df)
+    }
+    
+    # Calculate the percentage for the selected category for each dataset
+    sort_values <- plot_df %>%
+      filter(response_label == input$sortBy) %>%
+      select(dataset, percentage) %>%
+      arrange(desc(percentage))
+    
+    if (nrow(sort_values) == 0) {
+      return(plot_df)
+    }
+    
+    # Create ordered factor for datasets based on sorting
+    plot_df$dataset <- factor(plot_df$dataset, levels = sort_values$dataset)
+    
+    return(plot_df)
+  })
+  
+  # Calculate dynamic plot width based on number of datasets
+  plot_width <- reactive({
+    req(input$datasets)
+    n_datasets <- length(input$datasets)
+    
+    # Set minimum bar width equivalent (50px per bar minimum)
+    min_width_per_bar <- 50
+    total_min_width <- n_datasets * min_width_per_bar
+    
+    # Set minimum plot width (400px) and use dynamic width if more datasets
+    plot_width_px <- max(400, total_min_width)
+    
+    return(plot_width_px)
+  })
+  
+  # Create plot container with dynamic width
+  output$plotContainer <- renderUI({
+    req(plot_width())
+    
+    plotlyOutput("comparisonPlot", 
+                 height = "600px", 
+                 width = paste0(plot_width(), "px"))
+  })
+  
+  # Create the comparison plot using plotly
+  output$comparisonPlot <- renderPlotly({
+    req(sorted_plot_data())
+    
+    plot_df <- sorted_plot_data()
+    
     if (nrow(plot_df) == 0) {
-      return(ggplot() + 
-               annotate("text", x = 0.5, y = 0.5, label = "No data to display") +
-               theme_minimal())
+      return(plot_ly() %>%
+               add_annotations(text = "No data to display",
+                               x = 0.5, y = 0.5,
+                               showarrow = FALSE))
     }
     
-    # Create stacked bar chart with datasets on x-axis and response categories as fill
-    p <- ggplot(plot_df, aes(x = dataset, y = percentage, fill = response_label)) +
-      geom_col(position = "stack")
-    
-    # Add percentage labels if requested
-    if (input$showPercentages) {
-      p <- p + geom_text(aes(label = paste0(round(percentage, 1), "%")),
-                         position = position_stack(vjust = 0.5),
-                         size = 3, color = "white", fontface = "bold")
-    }
-    
-    # Customize the plot
-    p <- p +
-      labs(title = "Dataset Comparison - Response Distribution",
-           x = "Dataset",
-           y = "Percentage",
-           fill = "Response Category") +
-      theme_minimal() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1),
-            plot.title = element_text(hjust = 0.5, size = 16),
-            legend.position = "bottom") +
-      scale_y_continuous(labels = function(x) paste0(x, "%")) +
-      guides(fill = guide_legend(title.position = "top", ncol = 2))
+    # Create stacked bar chart
+    p <- plot_ly(data = plot_df,
+                 x = ~dataset,
+                 y = ~percentage,
+                 color = ~response_label,
+                 customdata = ~response_label,
+                 type = "bar",
+                 # Simplified hover text showing category and percentage
+                 hovertemplate = paste0(
+                   "<b>%{customdata}</b><br>",
+                   "%{y:.1f}%<br>",
+                   "<extra></extra>"
+                 )) %>%
+      layout(
+        title = list(text = variable_label(),
+                     x = 0,
+                     xanchor = "left",
+                     font = list(size = 16)),
+        xaxis = list(title = "Dataset",
+                     tickangle = 45),
+        yaxis = list(title = "Percentage",
+                     ticksuffix = "%"),
+        barmode = "stack",
+        # Remove legend since hover provides the info
+        showlegend = FALSE,
+        # Adjust bar width
+        bargap = 0.2,  # This controls space between groups of bars
+        margin = list(t = 60, b = 100, l = 60, r = 20)
+      ) %>%
+      config(displayModeBar = TRUE,
+             modeBarButtonsToRemove = c("pan2d", "select2d", "lasso2d", 
+                                        "zoomIn2d", "zoomOut2d", "autoScale2d"))
     
     return(p)
   })
   
-  # Create data summary table (only when requested)
+  # Create data summary table
   output$dataSummary <- DT::renderDataTable({
-    req(plot_data(), input$showDataSummary)
+    req(plot_data())
     
     plot_df <- plot_data()
     
@@ -229,9 +327,14 @@ server <- function(input, output, session) {
       select(response_code, response_label, everything())
     
     DT::datatable(summary_df,
-                  options = list(pageLength = 15,
-                                 scrollX = TRUE,
-                                 dom = 'ftip'),
+                  options = list(
+                    pageLength = 15,
+                    scrollX = TRUE,
+                    scrollY = "100%",
+                    scrollCollapse = TRUE,
+                    fixedHeader = TRUE,
+                    dom = 'ftip'
+                  ),
                   rownames = FALSE) %>%
       DT::formatRound(columns = 3:ncol(summary_df), digits = 1)
   })

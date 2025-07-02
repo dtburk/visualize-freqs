@@ -5,14 +5,13 @@ library(dplyr)
 library(tidyr)
 library(DT)
 library(readr)
-library(stringr)
 
 # UI
 ui <- page_sidebar(
   title = "Dataset Comparison Tool",
   sidebar = sidebar(
     fileInput("file", "Upload Tab-Delimited File",
-              accept = c(".dat")),
+              accept = ".dat"),
     
     conditionalPanel(
       condition = "output.fileUploaded",
@@ -30,6 +29,7 @@ ui <- page_sidebar(
       
       br(), br(),
       h4("Display Options"),
+      checkboxInput("showPercentages", "Show Percentages on Bars", value = TRUE),
       checkboxInput("showDataSummary", "Show Data Summary Table", value = FALSE)
     )
   ),
@@ -191,34 +191,28 @@ server <- function(input, output, session) {
     }
     
     # Create stacked bar chart with datasets on x-axis and response categories as fill
-    browser()
     p <- ggplot(plot_df, aes(x = dataset, y = percentage, fill = response_label)) +
-      geom_col(position = "stack") +
-      
-      # Add both category label and percentage on each bar section
-      geom_text(
-        aes(
-          label = paste0(
-            str_wrap(response_label, width = 30), 
-            "\n", 
-            round(percentage, 1), "%"
-          )
-        ),
-        position = position_stack(vjust = 0.5),
-        size = 5, 
-        color = "white", 
-        fontface = "bold"
-      ) +
-      
-      # Customize the plot
-      labs(title = "Sample Comparison - Response Distribution",
-           x = NULL,
-           y = "Percentage") +
+      geom_col(position = "stack")
+    
+    # Add percentage labels if requested
+    if (input$showPercentages) {
+      p <- p + geom_text(aes(label = paste0(round(percentage, 1), "%")),
+                         position = position_stack(vjust = 0.5),
+                         size = 3, color = "white", fontface = "bold")
+    }
+    
+    # Customize the plot
+    p <- p +
+      labs(title = "Dataset Comparison - Response Distribution",
+           x = "Dataset",
+           y = "Percentage",
+           fill = "Response Category") +
       theme_minimal() +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 15),
+      theme(axis.text.x = element_text(angle = 45, hjust = 1),
             plot.title = element_text(hjust = 0.5, size = 16),
-            legend.position = "none") +  # Remove legend
-      scale_y_continuous(labels = function(x) paste0(x, "%"))
+            legend.position = "bottom") +
+      scale_y_continuous(labels = function(x) paste0(x, "%")) +
+      guides(fill = guide_legend(title.position = "top", ncol = 2))
     
     return(p)
   })

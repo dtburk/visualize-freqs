@@ -22,13 +22,16 @@ ui <- page_navbar(
                   
                   h4("Display Options"),
                   selectInput("sortBy", 
-                              "Sort datasets by category:",
-                              choices = c("No sorting" = "none"),
+                              "Sort samples by category?",
+                              choices = c("No (sort by sample)" = "none"),
                               selected = "none"),
                   
-                  br(), br(),
+                  checkboxInput("excludeNIU", "Exclude NIU"),
+                  checkboxInput("excludeUnknown", "Exclude Unknown"),
                   
-                  h4("Select Datasets to Compare"),
+                  # br(),
+                  
+                  h4("Select Samples to Compare"),
                   selectInput("datasets", 
                               label = NULL,
                               choices = NULL,
@@ -53,7 +56,7 @@ ui <- page_navbar(
             )
   ),
   
-  nav_panel("Data Summary",
+  nav_panel("Table View",
             fillable = TRUE,
             conditionalPanel(
               condition = "output.fileUploaded",
@@ -149,7 +152,7 @@ server <- function(input, output, session) {
       
       # Update sort by choices with category labels
       category_labels <- df[[2]][!is.na(df[[2]]) & df[[2]] != ""]
-      sort_choices <- c("No sorting" = "none")
+      sort_choices <- c("No (sort by sample)" = "none")
       sort_choices <- c(sort_choices, setNames(category_labels, category_labels))
       updateSelectInput(session, "sortBy", choices = sort_choices)
       
@@ -181,9 +184,7 @@ server <- function(input, output, session) {
   # Grab variable label
   variable_label <- reactive({
     req(data())
-    
     df <- data()
-    
     return(names(df)[[2]])
   })
   
@@ -216,11 +217,54 @@ server <- function(input, output, session) {
     return(plot_df_long)
   })
   
-  # Prepare sorted data for plotting
-  sorted_plot_data <- reactive({
+  # Filter out NIU or Unknown if necessary
+  filtered_plot_data <- reactive({
     req(plot_data())
     
     plot_df <- plot_data()
+    
+    if (!input$excludeNIU & !input$excludeUnknown) {
+      return(plot_df)
+    }
+    
+    niu_labels <- c(
+      "NIU (not in universe)",
+      "NIU (not in universe)*"
+    )
+    
+    if (input$excludeNIU) {
+      plot_df <- plot_df |> 
+        filter(!response_label %in% niu_labels) |> 
+        mutate(
+          percentage = round(100 * percentage / sum(percentage), 1),
+          .by = dataset
+        )
+    }
+    
+    unknown_labels <- c(
+      "Unknown",
+      "Unknown*",
+      "Unknown/missing",
+      "Unknown/missing*"
+    )
+    
+    if (input$excludeUnknown) {
+      plot_df <- plot_df |> 
+        filter(!response_label %in% unknown_labels) |> 
+        mutate(
+          percentage = round(100 * percentage / sum(percentage), 1),
+          .by = dataset
+        )
+    }
+    
+    return(plot_df)
+  })
+  
+  # Prepare sorted data for plotting
+  filtered_and_sorted_plot_data <- reactive({
+    req(filtered_plot_data())
+    
+    plot_df <- filtered_plot_data()
     
     if (input$sortBy == "none" || is.null(input$sortBy)) {
       return(plot_df)
@@ -241,6 +285,7 @@ server <- function(input, output, session) {
     
     return(plot_df)
   })
+  
   
   # Calculate dynamic plot width based on number of datasets
   plot_width <- reactive({
@@ -268,9 +313,9 @@ server <- function(input, output, session) {
   
   # Create the comparison plot using plotly
   output$comparisonPlot <- renderPlotly({
-    req(sorted_plot_data())
+    req(filtered_and_sorted_plot_data())
     
-    plot_df <- sorted_plot_data()
+    plot_df <- filtered_and_sorted_plot_data()
     
     if (nrow(plot_df) == 0) {
       return(plot_ly() %>%

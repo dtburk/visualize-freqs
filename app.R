@@ -373,9 +373,11 @@ server <- function(input, output, session) {
       select(response_code, response_label, everything())
     
     DT::datatable(summary_df,
+                  extensions = "FixedColumns",
                   options = list(
                     pageLength = 15,
                     scrollX = TRUE,
+                    fixedColumns = list(leftColumns = 2),
                     scrollY = "100%",
                     scrollCollapse = TRUE,
                     fixedHeader = TRUE,

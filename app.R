@@ -32,15 +32,16 @@ ui <- page_navbar(
                   # br(),
                   
                   h4("Select Samples to Compare"),
+                  actionButton("selectAll", "Select All", class = "btn-sm"),
+                  actionButton("clearAll", "Clear All", class = "btn-sm"),
                   selectInput("datasets", 
                               label = NULL,
                               choices = NULL,
                               multiple = TRUE,
-                              selectize = TRUE),
+                              selectize = TRUE)
                   
-                  br(),
-                  actionButton("selectAll", "Select All", class = "btn-sm"),
-                  actionButton("clearAll", "Clear All", class = "btn-sm")
+                  # br(),
+                  
                 )
               ),
               
